@@ -36,10 +36,10 @@ mod tests {
     fn test_initialize_escrow() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         let result = client.initialize(&1, &creator, &token, &validators);
 
-        // assert!(result.is_ok());
 
         // Verify escrow was created
         let escrow = client.get_escrow(&1);
@@ -69,6 +69,7 @@ mod tests {
     fn test_initialize_duplicate_escrow() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client.initialize(&1, &creator, &token, &validators);
 
@@ -81,6 +82,7 @@ mod tests {
     fn test_deposit_funds() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -99,6 +101,7 @@ mod tests {
     fn test_deposit_invalid_amount() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -115,17 +118,14 @@ mod tests {
     fn test_create_milestone() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
-        client
-            .initialize(&1, &creator, &token, &validators)
-            ;
+        client.initialize(&1, &creator, &token, &validators);
 
         client.deposit(&1, &1000);
 
         let description = SorobanString::from_str(&env, "Phase 1");
-        let result = client.try_create_milestone(&1, &description, &500);
-
-        assert!(result.is_ok());
+        let result = client.create_milestone(&1, &description, &500);
 
         let milestone = client.get_milestone(&1, &0);
         assert_eq!(milestone.id, 0);
@@ -138,6 +138,7 @@ mod tests {
     fn test_create_milestone_exceeds_escrow() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -155,6 +156,7 @@ mod tests {
     fn test_create_multiple_milestones() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -183,6 +185,7 @@ mod tests {
     fn test_submit_milestone() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -209,6 +212,7 @@ mod tests {
     fn test_submit_milestone_invalid_status() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -235,6 +239,7 @@ mod tests {
     fn test_get_available_balance() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -264,6 +269,7 @@ mod tests {
     fn test_milestone_not_found() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -277,6 +283,7 @@ mod tests {
     fn test_milestone_status_transitions() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -309,6 +316,7 @@ mod tests {
     fn test_deposit_updates_correctly() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+        env.mock_all_auths();
 
         client
             .initialize(&1, &creator, &token, &validators)
@@ -333,6 +341,8 @@ mod tests {
     #[test]
     fn test_multiple_projects_isolated() {
         let env = Env::default();
+        env.mock_all_auths();
+
         env.ledger().set_timestamp(1000);
 
         let creator = Address::generate(&env);
