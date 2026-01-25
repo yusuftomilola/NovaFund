@@ -1,32 +1,28 @@
 #![no_std]
-
-// TODO: Implement subscription pool contract
-// This contract will handle:
-// - Create recurring investment pools
-// - Manage subscriber deposits (weekly/monthly/quarterly)
-// - Portfolio rebalancing
-// - Withdrawal with payout calculation
 use soroban_sdk::{
     contract, contracterror, contractimpl, contracttype, symbol_short, 
-    Address, Env, String, Symbol,
+    token, Address, Env, String, Vec, Symbol
 };
 
-// --- Data Models ---
+const MIN_SUBSCRIPTION: i128 = 100;
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(u32)]
 pub enum SubscriptionPeriod {
-    Weekly,
-    Monthly,
-    Quarterly,
+    Weekly = 604800,
+    Monthly = 2592000,
+    Quarterly = 7776000,
 }
 
 #[contracttype]
 #[derive(Clone)]
 pub enum DataKey {
-    Pool(u64),
-    Subscription(u64, Address),
-    PoolCount,
+    Admin,
+    PoolCounter,
+    Pool(u64),                     // pool_id -> Pool
+    Subscription(u64, Address),    // (pool_id, subscriber) -> Subscription
+    SubscribersList(u64),          // pool_id -> Vec<Address>
 }
 
 #[contracttype]
@@ -53,127 +49,148 @@ pub struct Subscription {
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u32)]
 pub enum Error {
-    BelowMinimum = 1,
-    InsufficientBalance = 2,
-    PeriodNotElapsed = 3,
-    PoolNotFound = 4,
-    SubscriptionNotFound = 5,
+    NotInitialized = 1,
+    AlreadyInitialized = 2,
+    InvalidAmount = 4,
+    InsufficientBalance = 5,
+    PoolNotFound = 7,
+    SubscriptionNotFound = 8,
 }
 
-// --- Constants ---
-const MIN_SUBSCRIPTION: i128 = 100_000_000; // Example: 10.0 units (7 decimals)
-
 #[contract]
-pub struct SubscriptionPoolContract;
+pub struct SubscriptionPool;
 
 #[contractimpl]
-impl SubscriptionPoolContract {
+impl SubscriptionPool {
+    pub fn initialize(env: Env, admin: Address) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Admin) {
+            return Err(Error::AlreadyInitialized);
+        }
+        env.storage().instance().set(&DataKey::Admin, &admin);
+        env.storage().instance().set(&DataKey::PoolCounter, &0u64);
+        Ok(())
+    }
 
     pub fn create_pool(env: Env, name: String, token: Address) -> u64 {
-        let mut count: u64 = env.storage().instance().get(&DataKey::PoolCount).unwrap_or(0);
+        let mut count: u64 = env.storage().instance().get(&DataKey::PoolCounter).unwrap_or(0);
         count += 1;
 
         let pool = Pool {
             pool_id: count,
-            name: name.clone(),
+            name,
             token,
             total_balance: 0,
             subscriber_count: 0,
         };
 
-        env.storage().instance().set(&DataKey::Pool(count), &pool);
-        env.storage().instance().set(&DataKey::PoolCount, &count);
-
-        // Event: Pool Creation
-        env.events().publish((symbol_short!("created"), count), name);
+        env.storage().persistent().set(&DataKey::Pool(count), &pool);
+        env.storage().instance().set(&DataKey::PoolCounter, &count);
+        env.events().publish((symbol_short!("pool_cre"), count), pool.name);
         count
     }
 
-    pub fn subscribe(env: Env, pool_id: u64, subscriber: Address, amount: i128, period: SubscriptionPeriod) -> Result<(), Error> {
+    pub fn subscribe(
+        env: Env,
+        pool_id: u64,
+        subscriber: Address,
+        amount: i128,
+        period: SubscriptionPeriod,
+    ) -> Result<(), Error> {
         subscriber.require_auth();
-
         if amount < MIN_SUBSCRIPTION {
-            return Err(Error::BelowMinimum);
+            return Err(Error::InvalidAmount);
         }
 
-        let mut pool = self::SubscriptionPoolContract::get_pool(env.clone(), pool_id)?;
-        let sub_key = DataKey::Subscription(pool_id, subscriber.clone());
+        let pool_key = DataKey::Pool(pool_id);
+        let mut pool: Pool = env.storage().persistent().get(&pool_key).ok_or(Error::PoolNotFound)?;
 
-        let subscription = Subscription {
+        let sub_key = DataKey::Subscription(pool_id, subscriber.clone());
+        if env.storage().persistent().has(&sub_key) {
+            return Err(Error::AlreadyInitialized);
+        }
+
+        let sub = Subscription {
             subscriber: subscriber.clone(),
             pool_id,
             amount,
             period,
-            last_payment: env.ledger().timestamp(),
+            last_payment: 0, 
         };
 
-        env.storage().persistent().set(&sub_key, &subscription);
+        let list_key = DataKey::SubscribersList(pool_id);
+        let mut subscribers: Vec<Address> = env.storage().persistent().get(&list_key).unwrap_or(Vec::new(&env));
+        subscribers.push_back(subscriber.clone());
         
         pool.subscriber_count += 1;
-        env.storage().instance().set(&DataKey::Pool(pool_id), &pool);
+        
+        env.storage().persistent().set(&sub_key, &sub);
+        env.storage().persistent().set(&list_key, &subscribers);
+        env.storage().persistent().set(&pool_key, &pool);
 
-        // Event: Subscription enrollment
-        env.events().publish((symbol_short!("subbed"), pool_id), subscriber);
+        env.events().publish((symbol_short!("subscr"), pool_id), subscriber);
         Ok(())
     }
 
-    pub fn process_deposits(env: Env, pool_id: u64, subscriber: Address) -> Result<(), Error> {
-        let sub_key = DataKey::Subscription(pool_id, subscriber.clone());
-        let mut sub: Subscription = env.storage().persistent().get(&sub_key).ok_or(Error::SubscriptionNotFound)?;
-        let mut pool = self::SubscriptionPoolContract::get_pool(env.clone(), pool_id)?;
+    pub fn process_deposits(env: Env, pool_id: u64) -> Result<(), Error> {
+        let pool_key = DataKey::Pool(pool_id);
+        let mut pool: Pool = env.storage().persistent().get(&pool_key).ok_or(Error::PoolNotFound)?;
+        let token_client = token::Client::new(&env, &pool.token);
+        
+        let list_key = DataKey::SubscribersList(pool_id);
+        let subscribers: Vec<Address> = env.storage().persistent().get(&list_key).unwrap_or(Vec::new(&env));
+        let current_time = env.ledger().timestamp();
 
-        let now = env.ledger().timestamp();
-        let seconds_in_period: u64 = match sub.period {
-            SubscriptionPeriod::Weekly => 604800,
-            SubscriptionPeriod::Monthly => 2592000,
-            SubscriptionPeriod::Quarterly => 7776000,
-        };
+        for subscriber_addr in subscribers.iter() {
+            let sub_key = DataKey::Subscription(pool_id, subscriber_addr.clone());
+            let mut sub: Subscription = env.storage().persistent().get(&sub_key).unwrap();
 
-        if now < (sub.last_payment + seconds_in_period) {
-            return Err(Error::PeriodNotElapsed);
+            let elapsed = current_time >= (sub.last_payment + (sub.period as u32 as u64));
+            
+            if sub.last_payment == 0 || elapsed {
+                // Transfer from user to contract
+                token_client.transfer(&sub.subscriber, &env.current_contract_address(), &sub.amount);
+                
+                sub.last_payment = current_time;
+                pool.total_balance += sub.amount;
+
+                env.storage().persistent().set(&sub_key, &sub);
+                env.events().publish((symbol_short!("deposit"), pool_id), subscriber_addr);
+            }
         }
 
-        // Logic Note: In a real scenario, invoke a Token Client transfer here
-        // pool_token_client.transfer(&sub.subscriber, &env.current_contract_address(), &sub.amount);
-
-        pool.total_balance += sub.amount;
-        sub.last_payment = now;
-
-        env.storage().persistent().set(&sub_key, &sub);
-        env.storage().instance().set(&DataKey::Pool(pool_id), &pool);
-
-        // Event: Processed deposit
-        env.events().publish((symbol_short!("deposit"), pool_id), sub.amount);
+        env.storage().persistent().set(&pool_key, &pool);
         Ok(())
     }
 
     pub fn withdraw(env: Env, pool_id: u64, subscriber: Address, amount: i128) -> Result<(), Error> {
         subscriber.require_auth();
-
-        let mut pool = self::SubscriptionPoolContract::get_pool(env.clone(), pool_id)?;
         
-        // Validation: Prevent withdrawing more than available in pool
-        if amount > pool.total_balance {
+        let pool_key = DataKey::Pool(pool_id);
+        let mut pool: Pool = env.storage().persistent().get(&pool_key).ok_or(Error::PoolNotFound)?;
+
+        if amount <= 0 || amount > pool.total_balance {
             return Err(Error::InsufficientBalance);
         }
 
-        pool.total_balance -= amount;
-        env.storage().instance().set(&DataKey::Pool(pool_id), &pool);
+        let token_client = token::Client::new(&env, &pool.token);
+        token_client.transfer(&env.current_contract_address(), &subscriber, &amount);
 
-        // Event: Withdrawal
-        env.events().publish((symbol_short!("withdraw"), pool_id), amount);
+        pool.total_balance -= amount;
+        env.storage().persistent().set(&pool_key, &pool);
+
+        env.events().publish((symbol_short!("withdraw"), pool_id), subscriber);
         Ok(())
     }
 
-    // --- Helpers / Getters ---
-
     pub fn get_pool(env: Env, pool_id: u64) -> Result<Pool, Error> {
-        env.storage().instance().get(&DataKey::Pool(pool_id)).ok_or(Error::PoolNotFound)
+        env.storage().persistent().get(&DataKey::Pool(pool_id)).ok_or(Error::PoolNotFound)
     }
 
     pub fn get_subscription(env: Env, pool_id: u64, subscriber: Address) -> Result<Subscription, Error> {
-        let sub_key = DataKey::Subscription(pool_id, subscriber);
-        env.storage().persistent().get(&sub_key).ok_or(Error::SubscriptionNotFound)
+        env.storage()
+            .persistent()
+            .get(&DataKey::Subscription(pool_id, subscriber))
+            .ok_or(Error::SubscriptionNotFound)
     }
 }
 
