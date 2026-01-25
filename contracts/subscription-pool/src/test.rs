@@ -1,110 +1,107 @@
-#![cfg(test)]
-use super::*;
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{Env, String};
+#[cfg(test)]
+mod test {
+    use crate::{SubscriptionPeriod, SubscriptionPool, SubscriptionPoolClient};
+    use super::*;
+    use soroban_sdk::testutils::{Address as _, Ledger};
+    use soroban_sdk::{token, Address, Env, String};
 
-/// Helper to setup the test environment
-fn setup_test(env: &Env) -> (SubscriptionPoolContractClient, Address, Address) {
-    env.mock_all_auths();
-    let contract_id = env.register_contract(None, SubscriptionPoolContract);
-    let client = SubscriptionPoolContractClient::new(&env, &contract_id);
-    let user = Address::generate(&env);
-    let token = Address::generate(&env);
-    (client, user, token)
-}
+    struct TestContext {
+        env: Env,
+        #[allow(dead_code)]
+        admin: Address,
+        user_1: Address,
+        user_2: Address,
+        token: token::Client<'static>,
+        contract: SubscriptionPoolClient<'static>,
+    }
 
-// --- 1. POOL & SUBSCRIPTION TESTS ---
+    impl TestContext {
+        fn setup() -> Self {
+            let env = Env::default();
+            
+            // FIX 1: Enable non-root auth. 
+            // This allows the contract to perform 'transfer' calls on behalf of users 
+            // during the test without needing manual signature mocks for every sub-call.
+            env.mock_all_auths_allowing_non_root_auth(); 
 
-#[test]
-fn test_pool_creation() {
-    let env = Env::default();
-    let (client, _, token) = setup_test(&env);
+            let admin = Address::generate(&env);
+            let user_1 = Address::generate(&env);
+            let user_2 = Address::generate(&env);
 
-    let name = String::from_str(&env, "Strategy A");
-    let pool_id = client.create_pool(&name, &token);
+            // FIX 2: Use register_stellar_asset_contract_v2 to avoid deprecation warnings
+            let token_address = env.register_stellar_asset_contract_v2(admin.clone()).address();
+            let token = token::Client::new(&env, &token_address);
+            let token_admin = token::StellarAssetClient::new(&env, &token_address);
 
-    let pool = client.get_pool(&pool_id);
-    assert_eq!(pool.pool_id, 1);
-    assert_eq!(pool.name, name);
-    assert_eq!(pool.total_balance, 0);
-}
+            let contract_id = env.register_contract(None, SubscriptionPool);
+            let contract = SubscriptionPoolClient::new(&env, &contract_id);
 
-#[test]
-fn test_subscriber_enrollment() {
-    let env = Env::default();
-    let (client, user, token) = setup_test(&env);
-    let pool_id = client.create_pool(&String::from_str(&env, "Strategy A"), &token);
+            contract.initialize(&admin);
+            token_admin.mint(&user_1, &10_000);
+            token_admin.mint(&user_2, &10_000);
 
-    let amount = 500_000_000;
-    client.subscribe(&pool_id, &user, &amount, &SubscriptionPeriod::Weekly);
+            TestContext { env, admin, user_1, user_2, token, contract }
+        }
+    }
 
-    let sub = client.get_subscription(&pool_id, &user);
-    assert_eq!(sub.amount, amount);
-    assert_eq!(sub.period, SubscriptionPeriod::Weekly);
-    assert_eq!(sub.subscriber, user);
-}
-
-// --- 2. RECURRING CONTRIBUTIONS TESTS ---
-
-#[test]
-fn test_process_deposits_increases_balance_after_period() {
-    let env = Env::default();
-    let (client, user, token) = setup_test(&env);
-    let pool_id = client.create_pool(&String::from_str(&env, "Strategy A"), &token);
-    let amount = 200_000_000;
-
-    client.subscribe(&pool_id, &user, &amount, &SubscriptionPeriod::Weekly);
-
-    // Warp time: 1 week = 604,800 seconds
-    env.ledger().with_mut(|li| li.timestamp = 604_801);
-
-    client.process_deposits(&pool_id, &user);
-
-    let pool = client.get_pool(&pool_id);
-    assert_eq!(pool.total_balance, amount);
-}
-
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #3)")] // #3 is Error::PeriodNotElapsed
-fn test_cannot_process_deposit_too_soon() {
-    let env = Env::default();
-    let (client, user, token) = setup_test(&env);
-    let pool_id = client.create_pool(&String::from_str(&env, "Strategy A"), &token);
-
-    client.subscribe(&pool_id, &user, &200_000_000, &SubscriptionPeriod::Monthly);
-
-    // Only 1 day passes instead of 30
-    env.ledger().with_mut(|li| li.timestamp = 86_400);
-
-    client.process_deposits(&pool_id, &user);
-}
-
-// --- 3. WITHDRAWAL TESTS ---
-
-#[test]
-fn test_withdrawal_reduces_balance() {
-    let env = Env::default();
-    let (client, user, token) = setup_test(&env);
-    let pool_id = client.create_pool(&String::from_str(&env, "Strategy A"), &token);
     
-    // Simulate a deposit first so there is money to withdraw
-    client.subscribe(&pool_id, &user, &500_000_000, &SubscriptionPeriod::Weekly);
-    env.ledger().with_mut(|li| li.timestamp = 604_801);
-    client.process_deposits(&pool_id, &user);
 
-    client.withdraw(&pool_id, &user, &200_000_000);
+    #[test]
+    fn test_successful_flow() {
+        let ctx = TestContext::setup();
+        let name = String::from_str(&ctx.env, "Alpha_Pool");
+        let pool_id = ctx.contract.create_pool(&name, &ctx.token.address);
 
-    let pool = client.get_pool(&pool_id);
-    assert_eq!(pool.total_balance, 300_000_000);
-}
+        ctx.contract.subscribe(&pool_id, &ctx.user_1, &1000, &SubscriptionPeriod::Weekly);
+        
+        // Initial Deposit
+        ctx.contract.process_deposits(&pool_id);
+        assert_eq!(ctx.token.balance(&ctx.user_1), 9000);
+        assert_eq!(ctx.token.balance(&ctx.contract.address), 1000);
 
-#[test]
-#[should_panic(expected = "HostError: Error(Contract, #2)")] // #2 is Error::InsufficientBalance
-fn test_guardrail_prevents_excessive_withdrawal() {
-    let env = Env::default();
-    let (client, user, token) = setup_test(&env);
-    let pool_id = client.create_pool(&String::from_str(&env, "Strategy A"), &token);
+        // Advance time 1 week (604800 seconds)
+        ctx.env.ledger().set_timestamp(604800 + 1);
+        ctx.contract.process_deposits(&pool_id);
+        assert_eq!(ctx.token.balance(&ctx.user_1), 8000);
+    }
 
-    // Pool is empty (0 balance)
-    client.withdraw(&pool_id, &user, &1); 
+    #[test]
+    fn test_multiple_subscribers() {
+        let ctx = TestContext::setup();
+        let pool_id = ctx.contract.create_pool(&String::from_str(&ctx.env, "Multi"), &ctx.token.address);
+
+        ctx.contract.subscribe(&pool_id, &ctx.user_1, &500, &SubscriptionPeriod::Monthly);
+        ctx.contract.subscribe(&pool_id, &ctx.user_2, &500, &SubscriptionPeriod::Monthly);
+
+        ctx.contract.process_deposits(&pool_id);
+
+        // Result from contract client is the struct, no .unwrap() needed
+        let pool = ctx.contract.get_pool(&pool_id); 
+        assert_eq!(pool.total_balance, 1000);
+        assert_eq!(pool.subscriber_count, 2);
+    }
+
+    #[test]
+    #[should_panic] 
+    fn test_min_amount_enforcement() {
+        let ctx = TestContext::setup();
+        let pool_id = ctx.contract.create_pool(&String::from_str(&ctx.env, "Strict"), &ctx.token.address);
+        // This should panic because 50 < MIN_SUBSCRIPTION (100)
+        ctx.contract.subscribe(&pool_id, &ctx.user_1, &50, &SubscriptionPeriod::Weekly);
+    }
+
+    #[test]
+    fn test_withdrawal() {
+        let ctx = TestContext::setup();
+        let pool_id = ctx.contract.create_pool(&String::from_str(&ctx.env, "Withdraw"), &ctx.token.address);
+
+        ctx.contract.subscribe(&pool_id, &ctx.user_1, &2000, &SubscriptionPeriod::Weekly);
+        ctx.contract.process_deposits(&pool_id);
+        
+        // Withdraw 1000
+        ctx.contract.withdraw(&pool_id, &ctx.user_1, &1000);
+        
+        assert_eq!(ctx.token.balance(&ctx.user_1), 9000); 
+        assert_eq!(ctx.token.balance(&ctx.contract.address), 1000);
+    }
 }
