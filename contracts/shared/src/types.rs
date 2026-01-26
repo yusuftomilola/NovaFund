@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, String, Vec};
+use soroban_sdk::{contracttype, Address, BytesN, String, Vec};
 
 /// Common timestamp type
 pub type Timestamp = u64;
@@ -62,19 +62,21 @@ pub enum MilestoneStatus {
     Rejected = 3,     // Rejected by majority
 }
 
+/// Milestone structure
 #[contracttype]
 #[derive(Clone, Debug)]
 pub struct Milestone {
     pub id: u64,
     pub project_id: u64,
-    pub description: String,
+    pub description_hash: Hash,
     pub amount: Amount,
     pub status: MilestoneStatus,
-    pub proof_hash: String,
+    pub proof_hash: Hash,
     pub approval_count: u32,
     pub rejection_count: u32,
     pub created_at: Timestamp,
 }
+
 /// Proposal status
 #[contracttype]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]

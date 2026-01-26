@@ -38,9 +38,6 @@ mod tests {
 
         let result = client.initialize(&1, &creator, &token, &validators);
 
-        env.mock_all_auths();
-        client.initialize(&1, &creator, &token, &validators);
-
         // Verify escrow was created
         let escrow = client.get_escrow(&1);
         assert_eq!(escrow.project_id, 1);
@@ -118,14 +115,13 @@ mod tests {
     fn test_create_milestone() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+
         env.mock_all_auths();
-
         client.initialize(&1, &creator, &token, &validators);
-
         client.deposit(&1, &1000);
 
-        let description = SorobanString::from_str(&env, "Phase 1");
-        let result = client.create_milestone(&1, &description, &500);
+        let description_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.create_milestone(&1, &description_hash, &500);
 
         let milestone = client.get_milestone(&1, &0);
         assert_eq!(milestone.id, 0);
@@ -139,16 +135,13 @@ mod tests {
     fn test_create_milestone_exceeds_escrow() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+
         env.mock_all_auths();
-
-        client
-            .initialize(&1, &creator, &token, &validators)
-            ;
-
+        client.initialize(&1, &creator, &token, &validators);
         client.deposit(&1, &500);
 
-        let description = SorobanString::from_str(&env, "Too much");
-        let result = client.try_create_milestone(&1, &description, &1000);
+        let description_hash = BytesN::from_array(&env, &[2u8; 32]);
+        let result = client.try_create_milestone(&1, &description_hash, &1000);
 
         assert!(result.is_err());
     }
@@ -157,26 +150,23 @@ mod tests {
     fn test_create_multiple_milestones() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+
         env.mock_all_auths();
-
-        client
-            .initialize(&1, &creator, &token, &validators)
-            ;
-
+        client.initialize(&1, &creator, &token, &validators);
         client.deposit(&1, &3000);
 
-        let desc1 = SorobanString::from_str(&env, "Phase 1");
-        let desc2 = SorobanString::from_str(&env, "Phase 2");
-        let desc3 = SorobanString::from_str(&env, "Phase 3");
+        let desc1 = BytesN::from_array(&env, &[1u8; 32]);
+        let desc2 = BytesN::from_array(&env, &[2u8; 32]);
+        let desc3 = BytesN::from_array(&env, &[3u8; 32]);
 
         client.create_milestone(&1, &desc1, &1000);
         client.create_milestone(&1, &desc2, &1000);
         client.create_milestone(&1, &desc3, &1000);
 
         // Verify all milestones exist
-        assert!(client.try_get_milestone(&1, &0).is_ok());
-        assert!(client.try_get_milestone(&1, &1).is_ok());
-        assert!(client.try_get_milestone(&1, &2).is_ok());
+        assert!(client.get_milestone(&1, &0).id == 0);
+        assert!(client.get_milestone(&1, &1).id == 1);
+        assert!(client.get_milestone(&1, &2).id == 2);
 
         let total = client.get_total_milestone_amount(&1);
         assert_eq!(total, 3000);
@@ -186,23 +176,16 @@ mod tests {
     fn test_submit_milestone() {
         let (env, creator, token, _, validators) = create_test_env();
         let client = create_client(&env);
+
         env.mock_all_auths();
-
-        client
-            .initialize(&1, &creator, &token, &validators)
-            ;
-
+        client.initialize(&1, &creator, &token, &validators);
         client.deposit(&1, &1000);
 
-        let description = SorobanString::from_str(&env, "Phase 1");
-        client
-            .create_milestone(&1, &description, &500)
-            ;
+        let description_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.create_milestone(&1, &description_hash, &500);
 
-        let proof_hash = SorobanString::from_str(&env, "hash_proof_123");
-        let result = client.try_submit_milestone(&1, &0, &proof_hash);
-
-        assert!(result.is_ok());
+        let proof_hash = BytesN::from_array(&env, &[9u8; 32]);
+        client.submit_milestone(&1, &0, &proof_hash);
 
         let milestone = client.get_milestone(&1, &0);
         assert_eq!(milestone.status, MilestoneStatus::Submitted);
@@ -221,16 +204,15 @@ mod tests {
 
         client.deposit(&1, &1000);
 
-        let description = SorobanString::from_str(&env, "Phase 1");
-        client
-            .create_milestone(&1, &description, &500)
-            ;
+        let description_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.create_milestone(&1, &description_hash, &500);
 
-        let proof_hash = SorobanString::from_str(&env, "hash_proof_123");
+        
+        let proof_hash = BytesN::from_array(&env, &[9u8; 32]);
         client.submit_milestone(&1, &0, &proof_hash);
 
         // Try to submit again - should fail because status is no longer Pending
-        let proof_hash2 = SorobanString::from_str(&env, "hash_proof_456");
+        let proof_hash2 = BytesN::from_array(&env, &[10u8; 32]);
         let result = client.try_submit_milestone(&1, &0, &proof_hash2);
 
         assert!(result.is_err());
@@ -292,11 +274,9 @@ mod tests {
 
         client.deposit(&1, &1000);
 
-        let description = SorobanString::from_str(&env, "Phase 1");
-        client
-            .create_milestone(&1, &description, &500)
-            ;
-
+        let description_hash = BytesN::from_array(&env, &[1u8; 32]);
+        client.create_milestone(&1, &description_hash, &500);
+        
         // Check initial status is Pending
         let milestone = client.get_milestone(&1, &0);
         assert_eq!(milestone.status, MilestoneStatus::Pending);
@@ -304,7 +284,7 @@ mod tests {
         assert_eq!(milestone.rejection_count, 0);
 
         // Submit milestone
-        let proof_hash = SorobanString::from_str(&env, "hash_proof_123");
+        let proof_hash = BytesN::from_array(&env, &[9u8; 32]);
         client.submit_milestone(&1, &0, &proof_hash);
 
         // Check status is now Submitted

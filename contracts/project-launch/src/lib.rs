@@ -50,18 +50,6 @@ pub enum DataKey {
 #[contract]
 pub struct ProjectLaunch;
 
-// #[contracterror]
-// #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-// #[repr(u32)]
-// pub enum Error {
-//     InvalidFundingGoal = 1000,
-//     InvalidDeadline = 1001,
-//     ProjectNotFound = 1002,
-//     ContributionTooLow = 1003,
-//     ProjectNotActive = 1004,
-//     DeadlinePassed = 1005,
-// }
-
 #[contractimpl]
 impl ProjectLaunch {
     /// Initialize the contract with an admin address
@@ -210,13 +198,10 @@ impl ProjectLaunch {
             .ok_or(Error::ProjectNotFound)
     }
 
-    /// Get project contributions
-    pub fn get_contributions(env: Env, project_id: u64) -> Result<Vec<Contribution>, Error> {
-        let contribution_key = (DataKey::Project, project_id);
-        env.storage()
-            .persistent()
-            .get(&contribution_key)
-            .ok_or(Error::ProjectNotFound)
+    /// Get individual contribution amount for a user
+    pub fn get_user_contribution(env: Env, project_id: u64, contributor: Address) -> i128 {
+        let key = (DataKey::ContributionAmount, project_id, contributor);
+        env.storage().persistent().get(&key).unwrap_or(0)
     }
 
     /// Get next project ID (for testing purposes)
@@ -320,9 +305,10 @@ mod tests {
     #[test]
     fn test_contribute() {
         let env = Env::default();
+        env.mock_all_auths();
+
         let contract_id = env.register_contract(None, ProjectLaunch);
         let client = ProjectLaunchClient::new(&env, &contract_id);
-        env.mock_all_auths();
 
         let admin = Address::generate(&env);
         let creator = Address::generate(&env);
