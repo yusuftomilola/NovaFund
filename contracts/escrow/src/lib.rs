@@ -5,7 +5,7 @@ use shared::{
     errors::Error,
     events::*,
     types::{Amount, EscrowInfo, Hash, Milestone, MilestoneStatus, PauseState, PendingUpgrade},
-    MIN_APPROVAL_THRESHOLD, MAX_APPROVAL_THRESHOLD,
+    MAX_APPROVAL_THRESHOLD, MIN_APPROVAL_THRESHOLD,
 };
 use soroban_sdk::{contract, contractimpl, token::TokenClient, Address, BytesN, Env, Vec};
 
@@ -59,7 +59,9 @@ impl EscrowContract {
             return Err(Error::AlreadyInitialized);
         }
 
-        if approval_threshold < MIN_APPROVAL_THRESHOLD || approval_threshold > MAX_APPROVAL_THRESHOLD {
+        if approval_threshold < MIN_APPROVAL_THRESHOLD
+            || approval_threshold > MAX_APPROVAL_THRESHOLD
+        {
             return Err(Error::InvalidInput);
         }
 
@@ -496,8 +498,10 @@ impl EscrowContract {
             execute_not_before: now + UPGRADE_TIME_LOCK_SECS,
         };
         set_pending_upgrade(&env, &pending);
-        env.events()
-            .publish((UPGRADE_SCHEDULED,), (admin, new_wasm_hash, pending.execute_not_before));
+        env.events().publish(
+            (UPGRADE_SCHEDULED,),
+            (admin, new_wasm_hash, pending.execute_not_before),
+        );
         Ok(())
     }
 
@@ -516,9 +520,11 @@ impl EscrowContract {
         if now < pending.execute_not_before {
             return Err(Error::UpgradeTooEarly);
         }
-        env.deployer().update_current_contract_wasm(pending.wasm_hash.clone());
+        env.deployer()
+            .update_current_contract_wasm(pending.wasm_hash.clone());
         clear_pending_upgrade(&env);
-        env.events().publish((UPGRADE_EXECUTED,), (admin, pending.wasm_hash));
+        env.events()
+            .publish((UPGRADE_EXECUTED,), (admin, pending.wasm_hash));
         Ok(())
     }
 
