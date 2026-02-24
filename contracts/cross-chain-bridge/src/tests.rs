@@ -246,7 +246,6 @@ fn test_deposit_paused_bridge() {
         &18,
     );
 
-
     // Mint some tokens to the bridge contract for distribution
     token_admin.mock_all_auths().mint(&client.address, &1000000);
 
@@ -290,15 +289,13 @@ fn test_deposit_duplicate_transaction() {
     let (token_client, _token_admin) = create_token_contract(&env, &client.address);
     let issuer = token_client.address.clone();
 
-    let _asset = client
-        .mock_all_auths()
-        .register_wrapped_asset(
-            &String::from_str(&env, "ETH"),
-            &issuer,
-            &ChainId::Ethereum,
-            &original_contract,
-            &18,
-        );
+    let _asset = client.mock_all_auths().register_wrapped_asset(
+        &String::from_str(&env, "ETH"),
+        &issuer,
+        &ChainId::Ethereum,
+        &original_contract,
+        &18,
+    );
 
     let (_token_client, token_admin) = create_token_contract(&env, &issuer);
     token_admin.mock_all_auths().mint(&client.address, &1000000);
@@ -408,15 +405,13 @@ fn test_get_transaction_count() {
     let (token_client, _token_admin) = create_token_contract(&env, &client.address);
     let issuer = token_client.address.clone();
 
-    let _asset = client
-        .mock_all_auths()
-        .register_wrapped_asset(
-            &String::from_str(&env, "ETH"),
-            &issuer,
-            &ChainId::Ethereum,
-            &original_contract,
-            &18,
-        );
+    let _asset = client.mock_all_auths().register_wrapped_asset(
+        &String::from_str(&env, "ETH"),
+        &issuer,
+        &ChainId::Ethereum,
+        &original_contract,
+        &18,
+    );
 
     let (_token_client, token_admin) = create_token_contract(&env, &issuer);
     token_admin.mock_all_auths().mint(&client.address, &1000000);
@@ -462,15 +457,13 @@ fn test_wrapped_asset_total_tracking() {
     let (token_client, _token_admin) = create_token_contract(&env, &client.address);
     let issuer = token_client.address.clone();
 
-    let _asset = client
-        .mock_all_auths()
-        .register_wrapped_asset(
-            &String::from_str(&env, "ETH"),
-            &issuer,
-            &ChainId::Ethereum,
-            &original_contract,
-            &18,
-        );
+    let _asset = client.mock_all_auths().register_wrapped_asset(
+        &String::from_str(&env, "ETH"),
+        &issuer,
+        &ChainId::Ethereum,
+        &original_contract,
+        &18,
+    );
 
     let (_token_client, token_admin) = create_token_contract(&env, &issuer);
     token_admin

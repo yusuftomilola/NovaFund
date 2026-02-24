@@ -13,7 +13,9 @@ use shared::{
     },
 };
 use soroban_sdk::{
-    contract, contractimpl, token::{TokenClient, StellarAssetClient}, Address, BytesN, Env, String,
+    contract, contractimpl,
+    token::{StellarAssetClient, TokenClient},
+    Address, BytesN, Env, String,
 };
 
 mod storage;
